@@ -29,7 +29,9 @@ prefectDemo/
 │   └── cycle.py         # Cron 排程 + .serve()
 ├── worker/
 │   └── deploy.py        # Work Pool + .deploy() 部署
-├── docker/              # (TODO) Docker Worker
+├── docker/
+│   ├── Dockerfile
+│   └── deploy_docker.py # Docker Worker 部署
 └── serverless/          # (TODO) Serverless 本機模擬
 ```
 
@@ -55,7 +57,6 @@ uv run src/prefectdemo/cycle.py
 > `.serve()` 腳本本身就是 Worker，需要持續跑著才能接排程。
 
 ```bash
-# 連到已啟動的 Prefect Server 並啟動排程
 PREFECT_API_URL=http://127.0.0.1:4200/api uv run ./cron/cycle.py
 ```
 
@@ -76,16 +77,16 @@ PREFECT_API_URL=http://127.0.0.1:4200/api uv run ./cron/cycle.py
 ### 操作步驟
 
 ```bash
-# 步驟 1：建立 Work Pool（只需執行一次）
+# 步驟 1：建立 Work Pool（只需一次）
 prefect work-pool create my-pool --type process
 
 # 步驟 2：啟動 Worker（開新 terminal，需持續跑著）
 PREFECT_API_URL=http://127.0.0.1:4200/api uv run prefect worker start --pool my-pool
 
-# 步驟 3：部署 Flow 到 Work Pool（登記）
+# 步驟 3：部署 Flow（登記）
 PREFECT_API_URL=http://127.0.0.1:4200/api uv run ./worker/deploy.py
 
-# 步驟 4：在 UI 手動觸發 Run，或等排程自動執行
+# 步驟 4：到 UI 手動觸發 Run
 # http://127.0.0.1:4200
 ```
 
@@ -100,16 +101,16 @@ PREFECT_API_URL=http://127.0.0.1:4200/api uv run ./worker/deploy.py
 | | Process Worker | Docker Worker |
 |---|---|---|
 | **執行環境** | 直接在本機 Process | 每次啟動全新 Container |
-| **環境隔離** | 與主機共用 Python 環境 | 完全隔離（Image 固定） |
+| **環境隔離** | 與主機共用 Python 環境 | 完全隔離（Image 固定）|
 | **接近生產** | ❌ | ✅（Cloud Run / ECS 也是容器）|
 | **冷啟動** | 快 | 較慢（需啟動容器）|
 
 ### 操作步驟
 
-# 加入 prefect-docker 套件
+```bash
+# 前置：加入 prefect-docker 套件（只需一次）
 uv add prefect-docker
 
-```bash
 # 步驟 1：Build Docker Image（在專案根目錄執行）
 docker build -f docker/Dockerfile -t prefect-demo:latest .
 
@@ -123,12 +124,12 @@ PREFECT_API_URL=http://127.0.0.1:4200/api uv run prefect worker start --pool doc
 PREFECT_API_URL=http://127.0.0.1:4200/api uv run ./docker/deploy_docker.py
 
 # 步驟 5：觸發執行，觀察容器被啟動
-prefect deployment run 'ETL Pipeline（Docker 版）/etl-docker-deployment'
+PREFECT_API_URL=http://127.0.0.1:4200/api prefect deployment run 'ETL Pipeline（Docker 版）/etl-docker-deployment'
 ```
 
-### 為什麼 Image 裡要設定 `PREFECT_API_URL`？
+### 為什麼容器內要設定 `PREFECT_API_URL`？
 
-容器是獨立的網路環境，無法直接用 `localhost:4200` 連回主機。  
+容器是獨立的網路環境，`localhost` 指的是容器自己，無法連到主機的 Prefect Server。  
 `host.docker.internal` 是 OrbStack / Docker Desktop 提供的特殊 hostname，指向主機 IP。
 
 ```
@@ -136,6 +137,14 @@ prefect deployment run 'ETL Pipeline（Docker 版）/etl-docker-deployment'
     → host.docker.internal:4200
         → [主機] Prefect Server :4200
 ```
+
+### `image_pull_policy` 說明
+
+| 值 | 行為 | 適用情境 |
+|---|---|---|
+| `"Never"` | 永遠用本機 image | 本機開發 |
+| `"IfNotPresent"` | 本機沒有才 pull | 正式環境推薦 |
+| `"Always"` | 每次都重新 pull | CI/CD |
 
 ---
 
@@ -146,14 +155,15 @@ prefect deployment run 'ETL Pipeline（Docker 版）/etl-docker-deployment'
 prefect work-pool ls
 prefect work-pool create my-pool --type process
 prefect work-pool create docker-pool --type docker
-prefect work-pool delete my-pool
+prefect work-pool delete <pool-name>
 
 # ── Deployment ────────────────────────────────────────────
 prefect deployment ls
-prefect deployment run 'ETL Pipeline（Work Pool 版）/etl-deployment'
-prefect deployment run 'ETL Pipeline（Docker 版）/etl-docker-deployment'
+PREFECT_API_URL=http://127.0.0.1:4200/api prefect deployment run 'ETL Pipeline（Work Pool 版）/etl-deployment'
+PREFECT_API_URL=http://127.0.0.1:4200/api prefect deployment run 'ETL Pipeline（Docker 版）/etl-docker-deployment'
 
 # ── Docker ────────────────────────────────────────────────
 docker build -f docker/Dockerfile -t prefect-demo:latest .
 docker images | grep prefect-demo
+docker ps    # 觸發後馬上執行，可看到容器瞬間出現
 ```
