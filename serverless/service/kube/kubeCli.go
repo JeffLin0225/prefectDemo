@@ -1,13 +1,21 @@
 package kube
 
 import (
+	"context"
+	"fmt"
+	"log"
 	"prefect-serverless/config"
+	"prefect-serverless/model"
 
+	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 )
 
-type KubeCli struct {
+type kubeCli struct {
 	client *kubernetes.Clientset
 	cfg    *config.Config
 }
@@ -38,4 +46,73 @@ func NewKubeCli(config *config.Config) (*KubeCli, error) {
 		client: clientSet,
 		cfg:    config,
 	}, nil
+}
+
+func (k *kubeCli) CreateJob(ctx context.Context, req model.RunRequest) (*batchv1.Job, error) {
+	// 1. 根據 SystemID 取得該系統核准的資源配額
+	reqRes, limitRes, err := k.resolveSystemResources(ctx, req.SystemID)
+	if err != nil {
+		log.Printf("Quota Error 系統 '%s' 資源驗證失敗: '%v'", req.SystemID, err)
+		return nil, fmt.Errorf("資源配額不合規: %w", err)
+	}
+
+	jobSpecs := k.buildJobSpec(req, reqRes, limitRes)
+
+	creatJob, err := k.client.BatchV1().Jobs(k.cfg.NameSpace).Create(ctx, jobSpecs, metav1.CreateOptions{})
+	if err != nil {
+		return fmt.Errorf("建立 Kubernetes Job 失敗: %w", err), nil
+	}
+
+	log.Printf("[Success] 已建立系統 '%s' 的 Job: '%s'", req.SystemID, creatJob.Name)
+	return creatJob, nil
+}
+
+/**
+ * （檢查/取） ConfigMap 資源配置
+ */
+func (k *kubeCli) resolveSystemResources(ctx context.Context, systemID string) (corev1.ResourceList, corev1.ResourceList, error) {
+
+	cmName := k.cfg.SystemQuotasCM
+
+	// 取 ConfigMap
+	cm, err := k.client.CoreV1().ConfigMaps(k.config.Namespace).Get(ctx, cmName, metav1.GetOptions{})
+	if err != nil {
+		return nil, nil, fmt.Errorf("無法取得 ConfigMap '%s': %w", cmName, err)
+	}
+
+	// 定義該系統在 ConfigMap 裡必須存在的 4 個 key
+	kCPUReq := fmt.Sprintf("%s.cpu_request", systemID)
+	kMemReq := fmt.Sprintf("%s.memory_request", systemID)
+	kCPULim := fmt.Sprintf("%s.cpu_limit", systemID)
+	kMemLim := fmt.Sprintf("%s.memory_limit", systemID)
+
+	// 檢查是否註冊過這個系統
+	if cm.Data[kCPUReq] == "" || cm.Data[kMemReq] == "" || cm.Data[kCPULim] == "" || cm.Data[kMemLim] == "" {
+		return nil, nil, fmt.Errorf("系統 '%s' 未在配額表註冊或配置不完整", systemID)
+	}
+
+	cpuReq, err := resource.ParseQuantity(cm.Data[kCPUReq])
+	if err != nil {
+		return nil, nil, fmt.Errorf("%s 格式錯誤: %w", kCPUReq, err)
+	}
+	memReq, err := resource.ParseQuantity(cm.Data[kMemReq])
+	if err != nil {
+		return nil, nil, fmt.Errorf("%s 格式錯誤: %w", kMemReq, err)
+	}
+	cpuLimit, err := resource.ParseQuantity(cm.Data[kCPULim])
+	if err != nil {
+		return nil, nil, fmt.Errorf("%s 格式錯誤: %w", kCPULim, err)
+	}
+	memLimit, err := resource.ParseQuantity(cm.Data[kMemLim])
+	if err != nil {
+		return nil, nil, fmt.Errorf("%s 格式錯誤: %w", kMemLim, err)
+	}
+
+	return corev1.ResourceList{
+			corev1.ResourceCPU:    cpuReq,
+			corev1.ResourceMemory: memReq,
+		}, corev1.ResourceList{
+			corev1.ResourceCPU:    cpuLimit,
+			corev1.ResourceMemory: memLimit,
+		}, nil
 }

@@ -8,10 +8,12 @@ import (
 )
 
 type Config struct {
-	PrefectAPIURL string
-	NameSpace     string
-	Image         string
-	Port          string
+	PrefectAPIURL   string
+	NameSpace       string
+	Image           string
+	Port            string
+	ImagePullPolicy string
+	SystemQuotasCM  string // 配額 ConfigMap 名稱
 }
 
 func LoadConfig() *Config {
@@ -20,9 +22,11 @@ func LoadConfig() *Config {
 	}
 
 	return &Config{
-		PrefectAPIURL: os.Getenv("PREFECT_API_URL"),
-		NameSpace:     os.Getenv("NAMESPACE"),
-		Image:         os.Getenv("IMAGE"),
-		Port:          os.Getenv("PORT"),
+		PrefectAPIURL:   os.Getenv("PREFECT_API_URL"),
+		NameSpace:       os.Getenv("NAMESPACE"),
+		Image:           os.Getenv("IMAGE"),
+		Port:            os.Getenv("PORT"),
+		ImagePullPolicy: getEnv("IMAGE_PULL_POLICY"),
+		SystemQuotasCM:  getEnv("SYSTEM_QUOTAS_CONFIGMAP"),
 	}
 }
