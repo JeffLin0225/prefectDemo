@@ -6,6 +6,7 @@ import (
 	"log"
 	"prefect-serverless/config"
 	"prefect-serverless/model"
+	"time"
 
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -20,7 +21,7 @@ type kubeCli struct {
 	cfg    *config.Config
 }
 
-func NewKubeCli(config *config.Config) (*KubeCli, error) {
+func NewKubeCli(config *config.Config) (*kubeCli, error) {
 
 	// 1. rest.InClusterConfig()：
 	// 專門用於「程式本身就跑在 K8s Pod 內部」的情境。
@@ -42,7 +43,7 @@ func NewKubeCli(config *config.Config) (*KubeCli, error) {
 		return nil, err
 	}
 
-	return &KubeCli{
+	return &kubeCli{
 		client: clientSet,
 		cfg:    config,
 	}, nil
@@ -115,4 +116,57 @@ func (k *kubeCli) resolveSystemResources(ctx context.Context, systemID string) (
 			corev1.ResourceCPU:    cpuLimit,
 			corev1.ResourceMemory: memLimit,
 		}, nil
+}
+
+func (k *kubeCli) buildJobSpec(req model.RunRequest, reqRes, limitRes corev1.ResourceList) *batchv1.Job {
+	// 1. 通用 Job 命名：格式為 job-<system_id>-<timestamp>
+	//（Printf 是直接印在終端機螢幕上，不會回傳字串）
+	jobName := fmt.Sprintf("job-%s-%d", req.SystemID, time.Now().UnixNano()/1e6)
+
+	backoffLimit := int32(0) // 批次任務不盲目重試
+
+	ttl := int32(300) // 執行完畢 5分鐘後自動被 kubernetes 回收
+
+	// 2. 將必帶的 map[string]string 轉換成 K8s 容器接受的 []corev1.EnvVar 切片
+	var envVars []corev1.EnvVar
+
+	return &batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      jobName,
+			Namespace: k.cfg.NameSpace,
+			Labels: map[string]string{
+				"app.kubernetes.io/managed-by": "serverless-engine",
+				"system_id":                    req.SystemID,
+				"task_id":                      req.TaskID,
+			},
+		},
+		Spec: batchv1.JobSpec{
+			BackoffLimit:            &backoffLimit,
+			TTLSecondsAfterFinished: &ttl,
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						"system_id": req.SystemID,
+						"task_id":   req.TaskID,
+					},
+				},
+				Spec: corev1.PodSpec{
+					RestartPolicy: corev1.RestartPolicyNever,
+					Containers: []corev1.Container{
+						{
+							Name:            "task-runner",
+							Image:           req.Image,
+							ImagePullPolicy: corev1.PullPolicy(k.cfg.ImagePullPolicy),
+							Command:         req.Command, // 沒傳為nil, k8s 自動執行 dockerfile 的 ENTRYPOINT
+							Env:             req.Env,
+							Resources: corev1.ResourceRequirements{
+								Requests: reqRes,
+								Limits:   limitRes,
+							},
+						},
+					},
+				},
+			},
+		},
+	}
 }
