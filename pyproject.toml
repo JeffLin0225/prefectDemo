@@ -10,6 +10,7 @@ requires-python = ">=3.12"
 dependencies = [
     "prefect>=3.8.2",
     "prefect-docker>=0.7.3",
+    "prefect-email>=0.4.2",
 ]
 
 [project.scripts]

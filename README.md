@@ -11,6 +11,14 @@ uv add prefect
 
 # 啟動 Prefect Server（Dashboard）
 uv run prefect server start
+
+# 清空 Dashboard 上的所有 Flow Runs、Deployments、Work Pools、Logs 等資料
+uv run prefect server database reset -y
+
+# 刪除 Prefect SQLite 資料庫檔案與暫存檔案
+rm -f ~/.prefect/prefect.db*
+rm -rf ~/.prefect/storage/*
+
 ```
 
 Dashboard 網址：http://127.0.0.1:4200
@@ -24,7 +32,10 @@ prefectDemo/
 ├── src/prefectdemo/
 │   ├── main.py          # 基礎 Flow / Task / Logger / Retry
 │   ├── mainError.py     # 模擬隨機失敗 + 自動重試
-│   └── cycle.py         # submit() 並行任務 + 子 Flow
+│   ├── cycle.py         # submit() 並行任務 + 子 Flow
+│   └── hitl_demo.py     # Human-in-the-loop 人工審批與流程暫停
+├── artifacts/
+│   └── artifacts_demo.py # UI 自訂報表（Markdown / Table Artifacts）
 ├── cron/
 │   └── cycle.py         # Cron 排程 + .serve()
 ├── worker/
@@ -145,6 +156,48 @@ PREFECT_API_URL=http://127.0.0.1:4200/api prefect deployment run 'ETL Pipeline�
 | `"Never"` | 永遠用本機 image | 本機開發 |
 | `"IfNotPresent"` | 本機沒有才 pull | 正式環境推薦 |
 | `"Always"` | 每次都重新 pull | CI/CD |
+
+---
+
+## 主題五：UI 自訂報表（Artifacts）
+
+> 不只看黑底白字 Log！直接將 Markdown 業務報告與 Table 表格發布至 Prefect Server 資料庫（不落實體檔），在 Dashboard 上可視化呈現。
+
+### 操作步驟
+
+```bash
+# 執行產生 Artifacts 範例
+PREFECT_API_URL=http://127.0.0.1:4200/api uv run artifacts/artifacts_demo.py
+```
+
+### 觀察重點
+1. 前往 Dashboard：`http://127.0.0.1:4200`
+2. 點擊進入剛完成的 Flow Run（`每日營收結算（含 UI 報表）`）。
+3. 切換至 **「Artifacts」** 頁籤，即可看到渲染好的 **Markdown 營收摘要卡片** 與 **各門市明細 Table**。
+
+---
+
+## 主題六：Human-in-the-loop（流程暫停與人工審批）
+
+> 在關鍵節點（如大筆資料覆寫、轉帳、發布正式模型）自動暫停 Flow，**不佔用 Worker/CPU 資源**，等待人員於 Web UI 上填寫表單審核。
+
+### 操作步驟
+
+```bash
+# 執行暫停與審核範例
+PREFECT_API_URL=http://127.0.0.1:4200/api uv run src/prefectdemo/hitl_demo.py
+```
+
+### 觀察重點
+1. 終端機執行至驗證步驟後，印出警告並進入 `Paused` 狀態等待輸入。
+2. 前往 Dashboard：`http://127.0.0.1:4200`，點進該筆 Flow Run（狀態為黃色 `Paused`）。
+3. 頁面中央會彈出互動式審批卡片：
+   * **Approver**：輸入審核人姓名
+   * **Approved**：勾選核准（或不勾選以駁回）
+   * **Reason**：輸入備註原因
+4. 點擊 **「Resume」** 按鈕：
+   * **核准情境**：終端機收到審核資訊，繼續執行寫入生產資料庫。
+   * **駁回情境**：終端機收到駁回原因，拋出中斷例外並標記 Flow 為 `Failed`。
 
 ---
 

@@ -1132,18 +1132,32 @@ wheels = [
 ]
 
 [[package]]
+name = "prefect-email"
+version = "0.4.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "prefect" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/68/34/db0062b75f79344c89be9ac94ee8d306ae186d23143516b153c476de3447/prefect_email-0.4.2.tar.gz", hash = "sha256:1bf49a47c72ac6276920fbedb385782aaa34d2bd7bd7df09825b5d8fd509a8fa", size = 16123, upload-time = "2025-04-09T17:44:09.212Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/8e/7c/d092fd341f4fa9677c71605e4745b473350b1eb0bd332d91ed911ab3f59c/prefect_email-0.4.2-py3-none-any.whl", hash = "sha256:9d11ed368f8eee4e9a55cafd04e70302acd1a7f585c9e672c4acf3675590a2ee", size = 11054, upload-time = "2025-04-09T17:44:08.141Z" },
+]
+
+[[package]]
 name = "prefectdemo"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "prefect" },
     { name = "prefect-docker" },
+    { name = "prefect-email" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "prefect", specifier = ">=3.8.2" },
     { name = "prefect-docker", specifier = ">=0.7.3" },
+    { name = "prefect-email", specifier = ">=0.4.2" },
 ]
 
 [[package]]
