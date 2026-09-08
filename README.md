@@ -1,16 +1,16 @@
 # Prefect 3.x 企業級工作流編排與混合 Worker 實戰專案
 
-基於 **Prefect 3.x**、**Python 3.12** 與 **uv** 建構的新一代雲原生工作流排程與資料編排系統。專案整合輕量開發排程（`.serve()`）、生產級解耦部署（`.deploy()`）、混合式工作池（Process Pool & Docker Pool）、Human-in-the-Loop（HITL）人工審批安全防線，以及 Serverless-ready 的結構化 UI 自訂報表（Artifacts）展示。
+基於 **Prefect 3.x**、**Python 3.12** 與 **uv** 現代套件管理器建構的新一代雲原生工作流排程與資料編排系統。專案展示由淺入深的架構演進：從輕量本機常駐排程（`.serve()`）、生產級解耦部署（`.deploy()`）、混合式工作池（Process Work Pool & Docker Work Pool）、人機協同治理（Human-in-the-Loop, HITL）安全防線，到 Serverless-ready 的結構化 UI 自訂報表（Artifacts）展示。
 
 ---
 
 ## 系統架構
 
-系統涵蓋「**主執行鏈路**（1~5）」、「**HITL 人工審查安全鏈路**（A~D）」與「**任務失敗重試治理**（R1~R2）」：
+系統架構採用**控制平面（Control Plane）**與**執行平面（Execution Plane）**解耦設計，並涵蓋「**主執行鏈路**（步驟 1 ~ 6）」、「**HITL 人機審核防線**（步驟 A ~ E）」與「**暫態容錯退避機制**（步驟 R1 ~ R3）」：
 
 ```mermaid
-flowchart TD
-    %% 樣式定義 (主題質感配色)
+flowchart TB
+    %% 樣式定義 (高質感主題配色)
     classDef trigger fill:#1e293b,stroke:#64748b,stroke-width:2px,color:#f8fafc;
     classDef server fill:#0f172a,stroke:#3b82f6,stroke-width:2px,color:#e0f2fe;
     classDef pool fill:#172554,stroke:#60a5fa,stroke-width:2px,color:#dbeafe;
@@ -21,119 +21,120 @@ flowchart TD
     classDef error fill:#450a0a,stroke:#ef4444,stroke-width:2px,color:#fee2e2;
 
     %% 觸發與進入層
-    subgraph TriggerLayer ["觸發與接入層 (Entry & Triggers)"]
-        CLI["開發者本機 CLI<br/><code>uv run ...</code>"]:::trigger
-        CronTrigger["排程觸發器 (Cron)<br/><code>Asia/Taipei</code> 時區感知"]:::trigger
+    subgraph TriggerLayer ["觸發與接入層 (Triggers & Entrypoints)"]
+        CLI["開發者本機 CLI<br/><code>uv run ...</code> / <code>prefect deployment run</code>"]:::trigger
+        CronTrigger["排程觸發器 (Cron Schedule)<br/><code>Asia/Taipei</code> 時區感知排程"]:::trigger
         WebUI["Prefect Web Dashboard<br/><code>http://127.0.0.1:4200</code>"]:::trigger
     end
 
     %% 控制平面
     subgraph ControlPlane ["中央控制平面 (Prefect Server Engine)"]
         ServerAPI["Prefect Orchestration Engine<br/><code>PREFECT_API_URL=:4200/api</code>"]:::server
-        MetadataDB[("Metadata & State Store<br/>SQLite / PostgreSQL")]:::server
-        ArtifactStore[("UI Artifacts Store<br/>Markdown & Table 資料庫")]:::artifact
+        MetadataDB[("Metadata & State Store<br/>Flow/Task States, Logs, FlowRuns")]:::server
+        ArtifactStore[("UI Artifacts Store<br/>Markdown Cards & Tables")]:::artifact
     end
 
     %% 調度與工作池
-    subgraph DispatchLayer ["任務排程與 Work Pool 層"]
+    subgraph DispatchLayer ["任務排程與 Work Pool 派發層"]
         ProcessPool["Process Work Pool<br/><code>my-pool (type: process)</code>"]:::pool
-        DockerPool["Docker Work Pool<br/><code>docker-pool (type: docker)</code>"]:::pool
+        DockerPool["Docker Work Pool<br/><code>docker-pool (type: docker)</code><br/><code>image_pull_policy: Never</code>"]:::pool
     end
 
     %% 執行平面
     subgraph ExecutionPlane ["混合執行平面 (Hybrid Worker Runtimes)"]
         subgraph ServeRuntime ["輕量常駐模式 (.serve)"]
-            ServeWorker["內嵌排程常駐程序<br/><code>cycle.py (.serve)</code>"]:::worker
+            ServeWorker["內嵌 Worker 常駐程序<br/><code>cron/cycle.py (.serve)</code>"]:::worker
         end
 
         subgraph ProcessRuntime ["解耦本機 Worker (.deploy)"]
             ProcessWorker["Process Worker 常駐程序<br/><code>prefect worker start --pool my-pool</code>"]:::worker
-            SubTasks["並行任務組<br/><code>task.submit() Futures</code>"]:::worker
+            SubTasks["並行任務組<br/><code>task.submit() Futures 非阻塞</code>"]:::worker
         end
 
-        subgraph DockerRuntime ["容器化工作節點 (Docker Worker)"]
+        subgraph DockerRuntime ["容器化隔離工作節點 (Docker Worker)"]
             DockerWorker["Docker Daemon 監聽 Worker<br/><code>prefect worker start --pool docker-pool</code>"]:::worker
-            DockerContainer["動態隔離容器 (Ephemeral)<br/><code>Image: prefect-demo:latest</code><br/><code>Network: host.docker.internal</code>"]:::container
+            DockerContainer["動態隔離容器 (Ephemeral Container)<br/><code>Image: prefect-demo:latest</code><br/><code>Network: host.docker.internal:4200</code>"]:::container
         end
     end
 
     %% 治理與人機審批防線
-    subgraph GovernancePlane ["人機協同審批防線 (Human-in-the-Loop)"]
+    subgraph GovernancePlane ["人機協同審批防線 (Human-in-the-Loop, HITL)"]
         ThresholdGate{"異動資料筆數檢核<br/><code>affected_rows >= 50,000</code>"}:::hitl
-        PauseState["流程休眠 (Paused State)<br/><code>pause_flow_run()</code><br/><i>CPU 零佔用，釋放 Worker</i>"]:::hitl
-        ApprovalModal["Dashboard 審批表單<br/><code>ApprovalForm (Pydantic)</code>"]:::hitl
+        PauseState["流程非阻塞休眠 (Paused State)<br/><code>pause_flow_run()</code><br/><i>CPU 零佔用，釋放 Worker 運算槽</i>"]:::hitl
+        ApprovalModal["Dashboard 審批表單<br/><code>ApprovalForm (Pydantic RunInput)</code>"]:::hitl
         Decision{"審批核准？"}:::hitl
         ProdWrite["寫入生產資料庫<br/><code>write_to_production()</code>"]:::artifact
-        AbortRun["熔斷終止流程 (Failed)<br/>拋出 RuntimeError"]:::error
+        AbortRun["熔斷終止保護 (Failed State)<br/>拋出 RuntimeError"]:::error
     end
 
     %% 異常重試機制
-    subgraph FaultTolerance ["容錯重試機制 (Fault Tolerance)"]
+    subgraph FaultTolerance ["容錯重試機制 (Fault Tolerance & Backoff)"]
         RetryTask["不穩定任務<br/><code>unstable_request()</code>"]:::error
-        RetryPolicy["自動指數/延遲退避<br/><code>retries=3, delay=2s</code>"]:::error
+        RetryPolicy["自動重試與延遲退避<br/><code>retries=3, retry_delay_seconds=2</code>"]:::error
     end
 
-    %% 主鏈路連線
+    %% 主鏈路連線 (標註序號 1~6)
     CLI -->|"1. 部署 Flow 定義 (.deploy)"| ServerAPI
-    CronTrigger -->|"1. 定時事件觸發"| ServerAPI
-    WebUI -->|"1. 手動觸發 Run"| ServerAPI
-    ServerAPI <-->|"狀態同步與持久化"| MetadataDB
+    CronTrigger -->|"1. 時區定時觸發事件"| ServerAPI
+    WebUI -->|"1. 手動發起 Run"| ServerAPI
+    ServerAPI <-->|"狀態雙向持久化"| MetadataDB
 
-    ServerAPI -->|"2. 派發至佇列"| ProcessPool
-    ServerAPI -->|"2. 派發至佇列"| DockerPool
+    ServerAPI -->|"2. 派發排程任務"| ProcessPool
+    ServerAPI -->|"2. 派發排程任務"| DockerPool
 
-    ProcessPool -->|"3. 拉取任務 (Poll)"| ProcessWorker
+    ProcessPool -->|"3. 長輪詢拉取任務 (Poll)"| ProcessWorker
     ProcessWorker -->|"4. 執行子任務並行"| SubTasks
-    SubTasks -->|"5. 生成報告"| ArtifactStore
+    SubTasks -->|"5. 輸出結構化指標"| ArtifactStore
 
-    DockerPool -->|"3. 拉取任務 (Poll)"| DockerWorker
-    DockerWorker -->|"4. 建立並啟動容器"| DockerContainer
-    DockerContainer -.->|"通訊回報主機 API<br/><code>host.docker.internal:4200</code>"| ServerAPI
-    DockerContainer -->|"5. 執行完畢自動銷毀 (Ephemeral)"| DockerContainer
+    DockerPool -->|"3. 長輪詢拉取任務 (Poll)"| DockerWorker
+    DockerWorker -->|"4. 動態建立獨立容器"| DockerContainer
+    DockerContainer -.->|"5. 透過虛擬 DNS 回報狀態<br/><code>host.docker.internal:4200</code>"| ServerAPI
+    DockerContainer -->|"6. 執行完畢自動銷毀釋放 (Ephemeral)"| DockerContainer
 
-    %% 異常重試鏈路
+    %% 異常重試鏈路 (標註序號 R1~R3)
     ProcessWorker --> RetryTask
-    RetryTask -->|"R1. 隨機拋出例外"| RetryPolicy
+    RetryTask -->|"R1. 隨機拋出網路超時例外"| RetryPolicy
     RetryPolicy -->|"R2. 滿足重試上限前自動重跑"| RetryTask
+    RetryPolicy -.->|"R3. 超過重試次數標記 Failed"| ServerAPI
 
-    %% HITL 治理鏈路
-    SubTasks -->|"A. 觸發閾值判定"| ThresholdGate
-    ThresholdGate -->|"超過安全閾值"| PauseState
-    PauseState -->|"B. 推送審批需求至 UI"| ApprovalModal
-    WebUI -.->|"人員審核輸入"| ApprovalModal
-    ApprovalModal -->|"C. 恢復執行"| Decision
-    Decision -->|"Yes (核准)"| ProdWrite
-    Decision -->|"No (駁回)"| AbortRun
-    ProdWrite -->|"D. 記錄審核歷程至 Metadata"| MetadataDB
+    %% HITL 治理鏈路 (標註序號 A~E)
+    SubTasks -->|"A. 驗證資料量超過安全門檻"| ThresholdGate
+    ThresholdGate -->|"B. 觸發流程休眠 (釋放 CPU)"| PauseState
+    PauseState -->|"C. 推送強型別表單至 Web UI"| ApprovalModal
+    WebUI -.->|"維運主管填寫審核資料"| ApprovalModal
+    ApprovalModal -->|"D. 恢復執行槽 (Resume)"| Decision
+    Decision -->|"Yes (同意發布)"| ProdWrite
+    Decision -->|"No (安全駁回)"| AbortRun
+    ProdWrite -->|"E. 審批歷程審計存檔"| MetadataDB
 ```
 
 ---
 
 ## 專案結構
 
-本專案採用清晰的模組化切分，涵蓋從入門 Flow 到生產級 Docker/HITL 的完整示範：
+專案目錄結構遵循清晰的關注點分離原則，各檔案與目錄職責如下：
 
 ```bash
-prefectDemo/
-├── .python-version                # Python 執行版本鎖定 (3.12)
-├── pyproject.toml                 # 專案依賴定義 (Prefect 3.8+, prefect-docker, prefect-email)
-├── uv.lock                        # 跨平台相依性精確鎖定檔 (uv package manager)
-├── README.md                      # 專案系統架構、各模組實作指南與維運手冊
-├── src/
-│   └── prefectdemo/
-│       ├── __init__.py            # Python 套件初始化入口
+Demo-Prefect/
+├── .python-version                # Python 執行環境版本鎖定 (3.12)
+├── pyproject.toml                 # 現代化專案依賴定義 (Prefect 3.8+, prefect-docker, prefect-email)
+├── uv.lock                        # 跨平台依賴版本精確鎖定檔 (由 uv package manager 維護)
+├── README.md                      # 專案架構圖、雙鏈路解析、實戰主題指南與維運手冊
+├── src/                           # 核心工作流原始碼目錄
+│   └── prefectdemo/               # Prefect 範例套件模組
+│       ├── __init__.py            # Python 模組初始化標記
 │       ├── main.py                # [基礎入門] Flow / Task 裝飾器、Logger 與基礎重試設定
 │       ├── mainError.py           # [容錯機制] 模擬不穩定連線、自訂 retries 與 retry_delay_seconds
-│       ├── cycle.py               # [並行編排] Dynamic Tasks、task.submit() 與 Futures 依賴控制
-│       └── hitl_demo.py           # [人機協同] Pydantic RunInput 表單、pause_flow_run 流程暫停與 UI 審批
-├── artifacts/
-│   └── artifacts_demo.py          # [可視化] 產出 Markdown Artifact 與 Table Artifact 報表展示
-├── cron/
-│   └── cycle.py                   # [輕量排程] 內嵌 Worker 模式，使用 .serve() 與時區感知 Cron
-├── worker/
-│   └── deploy.py                  # [生產解耦] Work Pool + .deploy() 部署模式，解耦程式碼與執行 Worker
-└── docker/
-    ├── Dockerfile                 # 容器化建構檔 (基於 python:3.12-slim，內建 uv 雙階段相依性快取)
+│       ├── cycle.py               # [並行編排] Dynamic Tasks、task.submit() 與 Futures 獨立非阻塞控制
+│       └── hitl_demo.py           # [人機協同] Pydantic RunInput 表單、pause_flow_run 非阻塞流程暫停與 UI 審批
+├── artifacts/                     # UI 自訂報表範例目錄
+│   └── artifacts_demo.py          # [可視化] 產出 Markdown Artifact 與 Table Artifact 結構化報表
+├── cron/                          # 輕量定時排程目錄
+│   └── cycle.py                   # [輕量常駐] 內嵌 Worker 模式，使用 .serve() 與 Asia/Taipei 時區感知 Cron
+├── worker/                        # 生產級解耦工作池目錄
+│   └── deploy.py                  # [生產解耦] Process Work Pool + .deploy() 模式，解耦程式碼來源與 Worker
+└── docker/                        # 雲原生容器化工作節點目錄
+    ├── Dockerfile                 # 雙階段快取容器映像檔建構腳本 (基於 python:3.12-slim + uv)
     └── deploy_docker.py           # [容器調度] Docker Work Pool 部署腳本，支援 host.docker.internal 穿透
 ```
 
@@ -141,11 +142,11 @@ prefectDemo/
 
 ## 環境初始化
 
-專案全面使用現代化 Python 工具鏈 [uv](https://github.com/astral-sh/uv) 進行環境管理：
+本專案全面使用高速現代化 Python 工具鏈 [uv](https://github.com/astral-sh/uv) 進行環境管理：
 
 ```bash
 # 1. 進入專案目錄
-cd prefectDemo
+cd Demo-Prefect
 
 # 2. 安裝依賴環境 (自動建立 .venv 並同步 uv.lock)
 uv sync
@@ -226,6 +227,7 @@ prefect work-pool create my-pool --type process
 PREFECT_API_URL=http://127.0.0.1:4200/api uv run prefect worker start --pool my-pool
 
 # 步驟 3：向 Work Pool 登記 Flow Deployment
+# 注意：若非預設路徑，請確認 worker/deploy.py 中的 from_source 路徑
 PREFECT_API_URL=http://127.0.0.1:4200/api uv run ./worker/deploy.py
 
 # 步驟 4：至 Dashboard 或透過 CLI 觸發執行
