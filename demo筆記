@@ -13,9 +13,4 @@ PREFECT_API_URL=http://127.0.0.1:4200/api python docker/deploy_docker.py
  PREFECT_API_URL=http://127.0.0.1:4200/api prefect worker start --pool docker-pool
 
 
-# ── Docker ────────────────────────────────────────────────
-docker build -f docker/Dockerfile -t prefect-demo:latest .
-
-docker images "prefect*"
-
- docker ps
+src/prefectdemo/hitl_demo.py
